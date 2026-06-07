@@ -108,7 +108,7 @@ export default function LandingPage() {
             </div>
             <div className="flex items-center gap-3">
               <Link href="/login" className="btn-ghost text-sm">Entrar</Link>
-              <Link href="/login" className="btn-primary text-sm">Começar grátis</Link>
+              <Link href="/register" className="btn-primary text-sm">Começar grátis</Link>
             </div>
           </div>
         </div>
@@ -130,7 +130,7 @@ export default function LandingPage() {
             Feito para estúdios que levam o negócio a sério.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link href="/login" className="btn-primary text-base px-8 py-3 flex items-center gap-2">
+            <Link href="/register" className="btn-primary text-base px-8 py-3 flex items-center gap-2">
               Começar trial gratuito <ChevronRight size={18} />
             </Link>
             <a href="#features" className="btn-outline text-base px-8 py-3">
@@ -289,7 +289,7 @@ export default function LandingPage() {
         <div className="max-w-2xl mx-auto text-center">
           <h2 className="text-3xl sm:text-4xl font-bold mb-4">Pronto para transformar seu estúdio?</h2>
           <p className="text-ink-400 mb-8">Configure em 3 comandos e comece a usar hoje mesmo.</p>
-          <Link href="/login" className="btn-primary text-base px-10 py-4 inline-flex items-center gap-2">
+          <Link href="/register" className="btn-primary text-base px-10 py-4 inline-flex items-center gap-2">
             Criar conta gratuita <ChevronRight size={18} />
           </Link>
         </div>

@@ -2,12 +2,29 @@ import { Controller, Post, Body, Get, UseGuards, Req, Res, HttpCode } from '@nes
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { IsEmail, IsString, MinLength, MaxLength, Matches } from 'class-validator';
 import { Request, Response } from 'express';
 import { AuthService, TokenPair } from './auth.service';
 import { MfaService } from './mfa.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { SignupDto } from './dto/signup.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+
+class ForgotPasswordDto {
+  @IsEmail() email: string;
+}
+
+class ResetPasswordDto {
+  @IsString() token: string;
+  @IsString()
+  @MinLength(10, { message: 'Senha deve ter pelo menos 10 caracteres' })
+  @MaxLength(128)
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&\-_#^()])/, {
+    message: 'Senha deve conter maiúscula, minúscula, número e símbolo',
+  })
+  newPassword: string;
+}
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser, JwtPayload } from '../common/decorators/current-user.decorator';
 import { TenantId } from '../common/decorators/tenant.decorator';
@@ -100,6 +117,42 @@ export class AuthController {
     const tokens = await this.authService.register(dto, tenantId);
     this.setCookies(res, tokens);
     return tokens;
+  }
+
+  // ─── Signup: cria novo tenant + admin (sem X-Tenant-ID) ─────────────────────
+
+  @Public()
+  @Post('signup')
+  @HttpCode(201)
+  @Throttle({ default: { limit: 5, ttl: 3_600_000 } })
+  @ApiOperation({ summary: 'Criar novo estúdio + admin — auto-cadastro público' })
+  async signup(
+    @Body() dto: SignupDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const tokens = await this.authService.signup(dto);
+    this.setCookies(res, tokens);
+    return tokens;
+  }
+
+  // ─── Forgot / Reset password ──────────────────────────────────────────────────
+
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 3, ttl: 300_000 } })
+  @ApiOperation({ summary: 'Solicitar link de recuperação de senha' })
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 5, ttl: 300_000 } })
+  @ApiOperation({ summary: 'Redefinir senha com token do e-mail' })
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.token, dto.newPassword);
   }
 
   @Public()

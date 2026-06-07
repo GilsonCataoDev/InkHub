@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -85,7 +86,12 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="text-sm text-ink-300 mb-1.5 block">Senha</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-sm text-ink-300">Senha</label>
+                <Link href="/forgot-password" className="text-xs text-brand-400 hover:text-brand-300">
+                  Esqueceu a senha?
+                </Link>
+              </div>
               <div className="relative">
                 <input
                   {...register('password')}
@@ -116,11 +122,17 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-4 pt-4 border-t border-ink-800 text-center">
-            <p className="text-sm text-ink-500">
+          <div className="mt-4 pt-4 border-t border-ink-800 space-y-3">
+            <p className="text-center text-sm text-ink-500">
+              Não tem conta?{' '}
+              <Link href="/register" className="text-brand-400 hover:text-brand-300 font-medium">
+                Criar estúdio grátis
+              </Link>
+            </p>
+            <p className="text-center text-sm text-ink-500">
               Demo: <span className="text-ink-300 font-mono">demo-studio</span> ·{' '}
               <span className="text-ink-300 font-mono">admin@demo-studio.com</span> ·{' '}
-              <span className="text-ink-300 font-mono">admin123</span>
+              <span className="text-ink-300 font-mono">Admin@123456</span>
             </p>
           </div>
         </div>

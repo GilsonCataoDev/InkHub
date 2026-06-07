@@ -3,16 +3,19 @@ import {
   UnauthorizedException,
   ConflictException,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { SignupDto } from './dto/signup.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import * as bcrypt from 'bcryptjs';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { UserRole } from '@prisma/client';
+import * as nodemailer from 'nodemailer';
 import { MfaService } from './mfa.service';
 
 interface GoogleUser {
@@ -186,6 +189,139 @@ export class AuthService {
     });
     if (!user) throw new NotFoundException('Usuário não encontrado');
     return user;
+  }
+
+  // ─── Signup: cria tenant + admin numa única transação ────────────────────────
+
+  async signup(dto: SignupDto): Promise<TokenPair> {
+    // Validar slug único
+    const existing = await this.prisma.tenant.findFirst({ where: { slug: dto.slug } });
+    if (existing) throw new ConflictException('Este endereço já está em uso. Escolha outro.');
+
+    const emailExists = await this.prisma.user.findFirst({
+      where: { email: dto.email, tenant: { slug: dto.slug } },
+    });
+    if (emailExists) throw new ConflictException('E-mail já cadastrado.');
+
+    const hash = await bcrypt.hash(dto.password, 12);
+
+    // Busca ou cria o plano FREE
+    let plan = await this.prisma.plan.findFirst({ where: { type: 'FREE' } });
+    if (!plan) {
+      plan = await this.prisma.plan.create({
+        data: { name: 'Free', type: 'FREE', maxUsers: 3, maxClients: 100, price: 0 },
+      });
+    }
+
+    // Transação: Tenant + Admin User em conjunto
+    const { user } = await this.prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.create({
+        data: {
+          name: dto.studioName,
+          slug: dto.slug,
+          planId: plan!.id,
+        },
+      });
+
+      const user = await tx.user.create({
+        data: {
+          tenantId: tenant.id,
+          email: dto.email,
+          name: dto.adminName,
+          passwordHash: hash,
+          role: UserRole.ADMIN,
+        },
+      });
+
+      return { tenant, user };
+    });
+
+    return this.generateTokens(user.id, user.email, user.role, user.tenantId);
+  }
+
+  // ─── Forgot password ──────────────────────────────────────────────────────────
+
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    // Busca usuário(s) com esse e-mail em qualquer tenant ativo
+    const users = await this.prisma.user.findMany({
+      where: { email, deletedAt: null, active: true, tenant: { active: true } },
+      include: { tenant: { select: { name: true, slug: true } } },
+    });
+
+    // Sempre retorna 200 — não revela se o e-mail existe (enumeração)
+    if (users.length === 0) return { message: 'Se o e-mail existir, você receberá o link em breve.' };
+
+    const mailer = nodemailer.createTransport({
+      host: this.config.get('SMTP_HOST') ?? 'smtp.mailtrap.io',
+      port: Number(this.config.get('SMTP_PORT') ?? 2525),
+      secure: this.config.get('SMTP_SECURE') === 'true',
+      auth: {
+        user: this.config.get('SMTP_USER'),
+        pass: this.config.get('SMTP_PASS'),
+      },
+    });
+
+    for (const user of users) {
+      const rawToken = randomUUID();
+      const tokenHash = this.hashToken(rawToken);
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
+
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { resetToken: tokenHash, resetTokenExp: expiresAt },
+      });
+
+      const appUrl = this.config.get('APP_URL') ?? this.config.get('NEXT_PUBLIC_APP_URL') ?? 'http://localhost:3000';
+      const resetUrl = `${appUrl}/reset-password?token=${rawToken}`;
+
+      const studioName = (user as any).tenant?.name ?? 'InkHub';
+
+      try {
+        await mailer.sendMail({
+          from: `"${studioName}" <${this.config.get('SMTP_USER') ?? 'noreply@inkhub.app'}>`,
+          to: user.email,
+          subject: `[${studioName}] Recuperação de senha`,
+          text: `Olá ${user.name},\n\nClique no link abaixo para redefinir sua senha (válido por 1 hora):\n\n${resetUrl}\n\nSe você não solicitou isso, ignore este e-mail.`,
+          html: `<p>Olá <strong>${user.name}</strong>,</p><p>Clique no link abaixo para redefinir sua senha (válido por 1 hora):</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>Se você não solicitou isso, ignore este e-mail.</p>`,
+        });
+      } catch (err) {
+        // Em dev sem SMTP configurado, loga o link no console
+        console.warn(`[ForgotPassword] SMTP não configurado. Link de reset:\n${resetUrl}`);
+      }
+    }
+
+    return { message: 'Se o e-mail existir, você receberá o link em breve.' };
+  }
+
+  // ─── Reset password ───────────────────────────────────────────────────────────
+
+  async resetPassword(rawToken: string, newPassword: string): Promise<{ message: string }> {
+    const tokenHash = this.hashToken(rawToken);
+
+    const user = await this.prisma.user.findFirst({
+      where: { resetToken: tokenHash, deletedAt: null, active: true },
+    });
+
+    if (!user) throw new BadRequestException('Token inválido ou já utilizado.');
+    if (!user.resetTokenExp || user.resetTokenExp < new Date()) {
+      throw new BadRequestException('Token expirado. Solicite um novo link.');
+    }
+
+    const hash = await bcrypt.hash(newPassword, 12);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash: hash,
+        resetToken: null,
+        resetTokenExp: null,
+        // Invalida todas as sessões abertas
+        refreshToken: null,
+        refreshTokenPrev: null,
+      },
+    });
+
+    return { message: 'Senha redefinida com sucesso. Faça login.' };
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────

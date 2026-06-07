@@ -166,6 +166,8 @@ model User {
   refreshTokenPrev String?   // SHA-256 do token anterior (reuse detection — VULN-017)
   mfaSecret        String?   // segredo TOTP criptografado (VULN-014)
   mfaEnabled       Boolean   @default(false)
+  resetToken       String?   // SHA-256 do token de recuperação de senha
+  resetTokenExp    DateTime? // expiração do token de recuperação
   active           Boolean   @default(true)
   lastLoginAt   DateTime?
   createdAt     DateTime  @default(now())
