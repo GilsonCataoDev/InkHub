@@ -73,7 +73,7 @@ export class TattooArtistsService {
         },
         include: { payments: true },
       }),
-      this.prisma.goal.findFirst({ where: { artistId: id, month, year } }),
+      this.prisma.goal.findFirst({ where: { artistId: id, tenantId, month, year } }),
     ]);
 
     const totalRevenue = appointments.reduce((sum, apt) => {

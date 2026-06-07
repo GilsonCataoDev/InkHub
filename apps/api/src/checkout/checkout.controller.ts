@@ -5,6 +5,7 @@ import { CheckoutService, CheckoutDto, CheckoutPreviewDto } from './checkout.ser
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
 import { Request } from 'express';
+import { Audit } from '../audit/audit.interceptor';
 
 interface AuthRequest extends Request {
   tenantId: string;
@@ -28,6 +29,7 @@ export class CheckoutController {
   @Post('appointments/:id/checkout')
   @HttpCode(201)
   @Roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.RECEPTIONIST)
+  @Audit('checkout.create', 'Appointment')
   checkout(
     @Param('id') id: string,
     @Body() dto: CheckoutDto,

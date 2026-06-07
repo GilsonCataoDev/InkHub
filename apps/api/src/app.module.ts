@@ -27,6 +27,9 @@ import { CheckoutModule } from './checkout/checkout.module';
 import { PortfolioModule } from './portfolio/portfolio.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { AutomationsModule } from './automations/automations.module';
+import { AuditModule } from './audit/audit.module';
+import { AuditInterceptor } from './audit/audit.interceptor';
+import { LgpdModule } from './lgpd/lgpd.module';
 
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -67,6 +70,8 @@ import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
     PortfolioModule,
     WhatsappModule,
     AutomationsModule,
+    AuditModule,
+    LgpdModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
@@ -74,6 +79,7 @@ import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
     { provide: APP_GUARD, useClass: TenantGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
   ],
 })

@@ -4,12 +4,24 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { AuthService, TokenPair } from './auth.service';
+import { MfaService } from './mfa.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser, JwtPayload } from '../common/decorators/current-user.decorator';
 import { TenantId } from '../common/decorators/tenant.decorator';
+import { Audit } from '../audit/audit.interceptor';
+import { IsString, Length } from 'class-validator';
+
+class MfaLoginDto {
+  @IsString() userId!: string;
+  @IsString() @Length(6, 6) token!: string;
+}
+
+class MfaTokenDto {
+  @IsString() @Length(6, 6) token!: string;
+}
 
 interface GoogleRequest extends Request {
   user?: { googleId: string; email: string; name: string; avatarUrl: string };
@@ -22,7 +34,10 @@ const REFRESH_MAX_AGE = 7  * 24 * 60 * 60 * 1000; // 7 dias
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private mfaService: MfaService,
+  ) {}
 
   // ─── VULN-007: set httpOnly cookies em todas as rotas de autenticação ────────
 
@@ -60,15 +75,17 @@ export class AuthController {
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: 'Login com e-mail e senha' })
+  @Audit('user.login', 'User')
   async login(
     @Body() dto: LoginDto,
     @TenantId() tenantId: string,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const tokens = await this.authService.login(dto, tenantId);
-    this.setCookies(res, tokens);
-    // Também retorna no body para clientes não-browser (mobile, API)
-    return tokens;
+    const result = await this.authService.login(dto, tenantId);
+    // VULN-014: se MFA ativo, não emite cookies ainda — retorna desafio
+    if ('mfaRequired' in result) return result;
+    this.setCookies(res, result);
+    return result;
   }
 
   @Public()
@@ -109,6 +126,7 @@ export class AuthController {
   @HttpCode(200)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Logout — invalida refresh token e limpa cookies' })
+  @Audit('user.logout', 'User')
   async logout(
     @CurrentUser() user: JwtPayload,
     @Res({ passthrough: true }) res: Response,
@@ -122,6 +140,52 @@ export class AuthController {
   @ApiOperation({ summary: 'Dados do usuário autenticado' })
   me(@CurrentUser() user: JwtPayload) {
     return this.authService.me(user.sub);
+  }
+
+  // ─── MFA (VULN-014) ──────────────────────────────────────────────────────────
+
+  /** Passo 1 de login com MFA: valida TOTP e emite tokens */
+  @Public()
+  @Post('mfa/login')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Completar login com código TOTP (segundo fator)' })
+  async mfaLogin(
+    @Body() dto: MfaLoginDto,
+    @TenantId() tenantId: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const tokens = await this.authService.loginWithMfa(dto.userId, tenantId, dto.token);
+    this.setCookies(res, tokens);
+    return tokens;
+  }
+
+  /** Inicia setup de MFA: gera segredo e retorna QR code */
+  @Post('mfa/setup')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Iniciar configuração de MFA TOTP' })
+  mfaSetup(@CurrentUser() user: JwtPayload) {
+    return this.mfaService.setupMfa(user.sub, user.tenantId);
+  }
+
+  /** Confirma o código e ativa MFA */
+  @Post('mfa/enable')
+  @HttpCode(200)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Ativar MFA após escanear QR code' })
+  @Audit('mfa.enable', 'User')
+  mfaEnable(@Body() dto: MfaTokenDto, @CurrentUser() user: JwtPayload) {
+    return this.mfaService.enableMfa(user.sub, user.tenantId, dto.token);
+  }
+
+  /** Desativa MFA (requer código atual) */
+  @Post('mfa/disable')
+  @HttpCode(200)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Desativar MFA' })
+  @Audit('mfa.disable', 'User')
+  mfaDisable(@Body() dto: MfaTokenDto, @CurrentUser() user: JwtPayload) {
+    return this.mfaService.disableMfa(user.sub, user.tenantId, dto.token);
   }
 
   @Public()

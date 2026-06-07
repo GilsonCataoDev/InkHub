@@ -145,6 +145,7 @@ model Tenant {
   portfolioItems  PortfolioItem[]
   whatsappConfig  WhatsappConfig?
   automations     Automation[]
+  auditLogs       AuditLog[]
 
   @@index([slug])
 }
@@ -161,8 +162,11 @@ model User {
   avatarUrl     String?
   role          UserRole  @default(RECEPTIONIST)
   googleId      String?
-  refreshToken  String?
-  active        Boolean   @default(true)
+  refreshToken     String?   // SHA-256 do token atual
+  refreshTokenPrev String?   // SHA-256 do token anterior (reuse detection — VULN-017)
+  mfaSecret        String?   // segredo TOTP criptografado (VULN-014)
+  mfaEnabled       Boolean   @default(false)
+  active           Boolean   @default(true)
   lastLoginAt   DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -817,4 +821,25 @@ model Briefing {
 
   @@index([tenantId])
   @@index([tenantId, status])
+}
+
+// ─── AuditLog (VULN-012) ─────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  userId     String?  // null = ação de sistema/webhook
+  userEmail  String?
+  action     String   // ex: "user.login", "checkout.create", "user.delete"
+  entity     String?  // ex: "Appointment", "User", "Product"
+  entityId   String?
+  meta       Json?    // dados adicionais (sem PII sensível)
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, action])
+  @@index([tenantId, userId])
 }

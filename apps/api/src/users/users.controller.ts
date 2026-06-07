@@ -5,6 +5,7 @@ import { CreateUserDto, UpdateUserDto, ChangePasswordDto } from './dto/create-us
 import { TenantId } from '../common/decorators/tenant.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
+import { Audit } from '../audit/audit.interceptor';
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -29,6 +30,7 @@ export class UsersController {
   @Post()
   @ApiOperation({ summary: 'Criar usuário no tenant' })
   @Roles(UserRole.ADMIN)
+  @Audit('user.create', 'User')
   create(@Body() dto: CreateUserDto, @TenantId() tenantId: string) {
     return this.service.create(dto, tenantId);
   }
@@ -36,6 +38,7 @@ export class UsersController {
   @Put(':id')
   @ApiOperation({ summary: 'Atualizar nome, role ou status' })
   @Roles(UserRole.ADMIN)
+  @Audit('user.update', 'User')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateUserDto,
@@ -58,6 +61,7 @@ export class UsersController {
   @Patch(':id/deactivate')
   @ApiOperation({ summary: 'Desativar usuário' })
   @Roles(UserRole.ADMIN)
+  @Audit('user.deactivate', 'User')
   deactivate(@Param('id') id: string, @TenantId() tenantId: string) {
     return this.service.deactivate(id, tenantId);
   }
@@ -65,6 +69,7 @@ export class UsersController {
   @Patch(':id/activate')
   @ApiOperation({ summary: 'Reativar usuário' })
   @Roles(UserRole.ADMIN)
+  @Audit('user.activate', 'User')
   activate(@Param('id') id: string, @TenantId() tenantId: string) {
     return this.service.activate(id, tenantId);
   }

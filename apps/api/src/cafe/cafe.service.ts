@@ -67,7 +67,7 @@ export class CafeService {
     if (!table) throw new NotFoundException('Mesa não encontrada');
 
     const existing = await this.prisma.order.findFirst({
-      where: { tableId, status: OrderStatus.OPEN },
+      where: { tableId, tenantId, status: OrderStatus.OPEN },
     });
     if (existing) throw new BadRequestException('Mesa já possui comanda aberta');
 
@@ -87,17 +87,18 @@ export class CafeService {
     cafeItemId?: string; productId?: string; quantity: number; notes?: string;
   }) {
     const order = await this.prisma.order.findFirst({
-      where: { id: orderId, status: OrderStatus.OPEN },
+      where: { id: orderId, tenantId, status: OrderStatus.OPEN },
     });
     if (!order) throw new NotFoundException('Comanda não encontrada ou já fechada');
 
     let unitPrice = 0;
     if (dto.cafeItemId) {
-      const item = await this.prisma.cafeItem.findUnique({ where: { id: dto.cafeItemId } });
+      // VULN-019: usar findFirst + tenantId para evitar acesso cross-tenant via UUID conhecido
+      const item = await this.prisma.cafeItem.findFirst({ where: { id: dto.cafeItemId, tenantId } });
       if (!item) throw new NotFoundException('Item de cardápio não encontrado');
       unitPrice = Number(item.price);
     } else if (dto.productId) {
-      const product = await this.prisma.product.findUnique({ where: { id: dto.productId } });
+      const product = await this.prisma.product.findFirst({ where: { id: dto.productId, tenantId, deletedAt: null } });
       if (!product) throw new NotFoundException('Produto não encontrado');
       unitPrice = Number(product.salePrice);
     }
@@ -109,7 +110,7 @@ export class CafeService {
 
   async closeOrder(orderId: string, tenantId: string, paymentMethod: string) {
     const order = await this.prisma.order.findFirst({
-      where: { id: orderId, status: OrderStatus.OPEN },
+      where: { id: orderId, tenantId, status: OrderStatus.OPEN },
       include: { items: { include: { cafeItem: true } } },
     });
     if (!order) throw new NotFoundException('Comanda não encontrada');

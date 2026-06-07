@@ -11,8 +11,9 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import * as bcrypt from 'bcryptjs';
-import { createHash, randomBytes } from 'crypto';
+import { createHash } from 'crypto';
 import { UserRole } from '@prisma/client';
+import { MfaService } from './mfa.service';
 
 interface GoogleUser {
   googleId: string;
@@ -26,17 +27,28 @@ export interface TokenPair {
   refreshToken: string;
 }
 
+/** Retornado quando o usuário precisa completar o segundo fator */
+export interface MfaChallenge {
+  mfaRequired: true;
+  userId: string;   // usado pelo frontend para chamar /auth/mfa/login
+}
+
 @Injectable()
 export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
     private config: ConfigService,
+    private mfa: MfaService,
   ) {}
 
-  async login(dto: LoginDto, tenantId: string): Promise<TokenPair> {
+  async login(dto: LoginDto, tenantId: string): Promise<TokenPair | MfaChallenge> {
     const user = await this.prisma.user.findFirst({
       where: { email: dto.email, tenantId, deletedAt: null, active: true },
+      select: {
+        id: true, email: true, role: true, tenantId: true,
+        passwordHash: true, mfaEnabled: true, mfaSecret: true,
+      },
     });
     if (!user || !user.passwordHash) throw new UnauthorizedException('Credenciais inválidas');
 
@@ -48,6 +60,26 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
+    // VULN-014: se MFA ativo, não emite tokens ainda — aguarda segundo fator
+    if (user.mfaEnabled && user.mfaSecret) {
+      return { mfaRequired: true, userId: user.id };
+    }
+
+    return this.generateTokens(user.id, user.email, user.role, user.tenantId);
+  }
+
+  /** VULN-014: segundo fator de login — valida TOTP e emite tokens */
+  async loginWithMfa(userId: string, tenantId: string, token: string): Promise<TokenPair> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, tenantId, deletedAt: null, active: true },
+      select: { id: true, email: true, role: true, tenantId: true, mfaEnabled: true, mfaSecret: true },
+    });
+    if (!user?.mfaEnabled || !user?.mfaSecret) {
+      throw new UnauthorizedException('MFA não configurado');
+    }
+    if (!this.mfa.verifyToken(user.mfaSecret, token)) {
+      throw new UnauthorizedException('Código MFA inválido');
+    }
     return this.generateTokens(user.id, user.email, user.role, user.tenantId);
   }
 
@@ -77,9 +109,23 @@ export class AuthService {
     const tokenHash = this.hashToken(refreshToken);
 
     const user = await this.prisma.user.findFirst({
-      where: { refreshToken: tokenHash, tenantId, deletedAt: null },
+      where: { tenantId, deletedAt: null, OR: [{ refreshToken: tokenHash }, { refreshTokenPrev: tokenHash }] },
     });
+
     if (!user) throw new UnauthorizedException('Refresh token inválido ou expirado');
+
+    // VULN-017: reuse detection — se o hash bate com o ANTERIOR (já rotacionado),
+    // significa que alguém está tentando reutilizar um token já consumido.
+    // Provável roubo de token → invalidamos tudo imediatamente.
+    if (user.refreshTokenPrev === tokenHash) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { refreshToken: null, refreshTokenPrev: null },
+      });
+      throw new UnauthorizedException(
+        'Refresh token já foi utilizado. Por segurança, faça login novamente.',
+      );
+    }
 
     return this.generateTokens(user.id, user.email, user.role, user.tenantId);
   }
@@ -87,7 +133,7 @@ export class AuthService {
   async logout(userId: string): Promise<{ message: string }> {
     await this.prisma.user.update({
       where: { id: userId },
-      data: { refreshToken: null },
+      data: { refreshToken: null, refreshTokenPrev: null },
     });
     return { message: 'Logout realizado com sucesso' };
   }
@@ -171,10 +217,18 @@ export class AuthService {
       }),
     ]);
 
-    // VULN-009: salvar hash SHA-256 do refresh token, não o token em si
+    // VULN-009 + VULN-017: salvar novo hash e promover atual para "anterior"
+    // O token anterior é mantido por 1 ciclo para detectar reuse (token theft)
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { refreshToken: true },
+    });
     await this.prisma.user.update({
       where: { id: userId },
-      data: { refreshToken: this.hashToken(refreshToken) },
+      data: {
+        refreshTokenPrev: currentUser?.refreshToken ?? null, // promove atual → anterior
+        refreshToken: this.hashToken(refreshToken),          // armazena novo
+      },
     });
 
     return { accessToken, refreshToken };
