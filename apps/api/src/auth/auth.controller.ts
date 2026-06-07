@@ -2,7 +2,7 @@ import { Controller, Post, Body, Get, UseGuards, Req, Res, HttpCode } from '@nes
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { IsEmail, IsString, MinLength, MaxLength, Matches } from 'class-validator';
+import { IsEmail, IsString, MinLength, MaxLength, Matches, Length } from 'class-validator';
 import { Request, Response } from 'express';
 import { AuthService, TokenPair } from './auth.service';
 import { MfaService } from './mfa.service';
@@ -10,6 +10,10 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { SignupDto } from './dto/signup.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { Public } from '../common/decorators/public.decorator';
+import { CurrentUser, JwtPayload } from '../common/decorators/current-user.decorator';
+import { TenantId } from '../common/decorators/tenant.decorator';
+import { Audit } from '../audit/audit.interceptor';
 
 class ForgotPasswordDto {
   @IsEmail() @MaxLength(255) email: string;
@@ -25,11 +29,6 @@ class ResetPasswordDto {
   })
   newPassword: string;
 }
-import { Public } from '../common/decorators/public.decorator';
-import { CurrentUser, JwtPayload } from '../common/decorators/current-user.decorator';
-import { TenantId } from '../common/decorators/tenant.decorator';
-import { Audit } from '../audit/audit.interceptor';
-import { IsString, Length } from 'class-validator';
 
 class MfaLoginDto {
   @IsString() userId!: string;
