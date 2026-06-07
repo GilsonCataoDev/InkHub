@@ -1,6 +1,14 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  eslint: {
+    // ESLint roda em CI separado — não bloqueia o build de produção
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    // Type-check roda em CI separado
+    ignoreBuildErrors: true,
+  },
   images: {
     remotePatterns: [
       { protocol: 'http', hostname: 'localhost' },
