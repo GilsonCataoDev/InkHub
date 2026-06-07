@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { BaileysService } from '../whatsapp/baileys.service';
 import { Cron } from '@nestjs/schedule';
 import * as nodemailer from 'nodemailer';
 
@@ -36,7 +37,10 @@ export class AutomationsService {
     },
   });
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private baileys: BaileysService,
+  ) {}
 
   async findAll(tenantId: string) {
     const automations = await this.prisma.automation.findMany({
@@ -256,9 +260,7 @@ export class AutomationsService {
           const jid = normalized.startsWith('55') ? `${normalized}@s.whatsapp.net` : `55${normalized}@s.whatsapp.net`;
 
           if (wppConfig.provider === 'baileys') {
-            // Baileys send — look up socket via a simple HTTP call to own API or emit event
-            // For now mark as queued — BaileysService handles via separate mechanism
-            return false;
+            return await this.baileys.sendMessage(tenantId, client.phone, body);
           }
 
           if (wppConfig.provider === 'evolution' && wppConfig.instanceUrl) {
