@@ -67,9 +67,9 @@ async function main() {
   console.log('✅ Tenant criado:', tenant.name);
 
   // ─── Users ──────────────────────────────────────────────────────────────────
-  const adminHash = await bcrypt.hash('admin123', 10);
-  const artistHash = await bcrypt.hash('artist123', 10);
-  const baristaHash = await bcrypt.hash('barista123', 10);
+  const adminHash = await bcrypt.hash('Admin@123456', 12);
+  const artistHash = await bcrypt.hash('Artist@123456', 12);
+  const baristaHash = await bcrypt.hash('Barista@123456', 12);
 
   const adminUser = await prisma.user.upsert({
     where: { tenantId_email: { tenantId: tenant.id, email: 'admin@demo-studio.com' } },
@@ -89,7 +89,7 @@ async function main() {
     create: {
       tenantId: tenant.id,
       email: 'recepcao@demo-studio.com',
-      passwordHash: await bcrypt.hash('recepcao123', 10),
+      passwordHash: await bcrypt.hash('Recepcao@123456', 12),
       name: 'Ana Recepção',
       role: UserRole.RECEPTIONIST,
     },
@@ -494,10 +494,10 @@ async function main() {
 
   console.log('\n🎉 Seed concluído com sucesso!\n');
   console.log('📋 Credenciais:');
-  console.log('  Admin:      admin@demo-studio.com     / admin123');
-  console.log('  Tatuador:   rafael@demo-studio.com   / artist123');
-  console.log('  Barista:    barista@demo-studio.com  / barista123');
-  console.log('  Recepção:   recepcao@demo-studio.com / recepcao123');
+  console.log('  Admin:      admin@demo-studio.com     / Admin@123456');
+  console.log('  Tatuador:   rafael@demo-studio.com   / Artist@123456');
+  console.log('  Barista:    barista@demo-studio.com  / Barista@123456');
+  console.log('  Recepção:   recepcao@demo-studio.com / Recepcao@123456');
   console.log('\n🌐 URLs:');
   console.log('  Frontend:  http://localhost:3000');
   console.log('  API:       http://localhost:3001');

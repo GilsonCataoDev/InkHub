@@ -13,3 +13,6 @@ coverage/
 prisma/generated/
 *.pem
 *.key
+*.docx
+*.xlsx
+~$*
