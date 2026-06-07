@@ -15,6 +15,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import * as bcrypt from 'bcryptjs';
 import { createHash, randomUUID } from 'crypto';
 import { UserRole } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import * as nodemailer from 'nodemailer';
 import { MfaService } from './mfa.service';
 
@@ -194,18 +195,10 @@ export class AuthService {
   // ─── Signup: cria tenant + admin numa única transação ────────────────────────
 
   async signup(dto: SignupDto): Promise<TokenPair> {
-    // Validar slug único
-    const existing = await this.prisma.tenant.findFirst({ where: { slug: dto.slug } });
-    if (existing) throw new ConflictException('Este endereço já está em uso. Escolha outro.');
-
-    const emailExists = await this.prisma.user.findFirst({
-      where: { email: dto.email, tenant: { slug: dto.slug } },
-    });
-    if (emailExists) throw new ConflictException('E-mail já cadastrado.');
-
+    // bcrypt fora da transação — operação lenta não deve segurar lock do banco
     const hash = await bcrypt.hash(dto.password, 12);
 
-    // Busca ou cria o plano FREE
+    // Busca ou cria o plano FREE (sem lock — idempotente)
     let plan = await this.prisma.plan.findFirst({ where: { type: 'FREE' } });
     if (!plan) {
       plan = await this.prisma.plan.create({
@@ -214,83 +207,102 @@ export class AuthService {
     }
 
     // Transação: Tenant + Admin User em conjunto
-    const { user } = await this.prisma.$transaction(async (tx) => {
-      const tenant = await tx.tenant.create({
-        data: {
-          name: dto.studioName,
-          slug: dto.slug,
-          planId: plan!.id,
-        },
+    // A unicidade do slug é garantida pela constraint @unique do banco.
+    // Capturamos P2002 para devolver 409 limpo em vez de 500.
+    try {
+      const { user } = await this.prisma.$transaction(async (tx) => {
+        const tenant = await tx.tenant.create({
+          data: {
+            name: dto.studioName,
+            slug: dto.slug,
+            planId: plan!.id,
+          },
+        });
+
+        const user = await tx.user.create({
+          data: {
+            tenantId: tenant.id,
+            email: dto.email,
+            name: dto.adminName,
+            passwordHash: hash,
+            role: UserRole.ADMIN,
+          },
+        });
+
+        return { tenant, user };
       });
 
-      const user = await tx.user.create({
-        data: {
-          tenantId: tenant.id,
-          email: dto.email,
-          name: dto.adminName,
-          passwordHash: hash,
-          role: UserRole.ADMIN,
-        },
-      });
-
-      return { tenant, user };
-    });
-
-    return this.generateTokens(user.id, user.email, user.role, user.tenantId);
+      return this.generateTokens(user.id, user.email, user.role, user.tenantId);
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('Este endereço já está em uso. Escolha outro.');
+      }
+      throw err;
+    }
   }
 
   // ─── Forgot password ──────────────────────────────────────────────────────────
 
   async forgotPassword(email: string): Promise<{ message: string }> {
-    // Busca usuário(s) com esse e-mail em qualquer tenant ativo
-    const users = await this.prisma.user.findMany({
-      where: { email, deletedAt: null, active: true, tenant: { active: true } },
-      include: { tenant: { select: { name: true, slug: true } } },
-    });
+    // ── Anti-timing: resposta SEMPRE retorna imediatamente ────────────────────
+    // O envio do e-mail ocorre em background (void) para que o tempo de resposta
+    // não revele se o e-mail existe ou não (enumeração via timing oracle).
+    void this.sendPasswordResetEmails(email);
+    return { message: 'Se o e-mail existir, você receberá o link em breve.' };
+  }
 
-    // Sempre retorna 200 — não revela se o e-mail existe (enumeração)
-    if (users.length === 0) return { message: 'Se o e-mail existir, você receberá o link em breve.' };
+  /** Executa em background — não bloqueia a resposta HTTP */
+  private async sendPasswordResetEmails(email: string): Promise<void> {
+    try {
+      const users = await this.prisma.user.findMany({
+        where: { email, deletedAt: null, active: true, tenant: { active: true } },
+        include: { tenant: { select: { name: true } } },
+      });
 
-    const mailer = nodemailer.createTransport({
-      host: this.config.get('SMTP_HOST') ?? 'smtp.mailtrap.io',
-      port: Number(this.config.get('SMTP_PORT') ?? 2525),
-      secure: this.config.get('SMTP_SECURE') === 'true',
-      auth: {
-        user: this.config.get('SMTP_USER'),
-        pass: this.config.get('SMTP_PASS'),
-      },
-    });
+      if (users.length === 0) return;
 
-    for (const user of users) {
-      const rawToken = randomUUID();
-      const tokenHash = this.hashToken(rawToken);
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
-
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { resetToken: tokenHash, resetTokenExp: expiresAt },
+      const mailer = nodemailer.createTransport({
+        host: this.config.get('SMTP_HOST') ?? 'smtp.mailtrap.io',
+        port: Number(this.config.get('SMTP_PORT') ?? 2525),
+        secure: this.config.get('SMTP_SECURE') === 'true',
+        auth: {
+          user: this.config.get('SMTP_USER'),
+          pass: this.config.get('SMTP_PASS'),
+        },
       });
 
       const appUrl = this.config.get('APP_URL') ?? this.config.get('NEXT_PUBLIC_APP_URL') ?? 'http://localhost:3000';
-      const resetUrl = `${appUrl}/reset-password?token=${rawToken}`;
 
-      const studioName = (user as any).tenant?.name ?? 'InkHub';
+      for (const user of users) {
+        const rawToken = randomUUID();
+        const tokenHash = this.hashToken(rawToken);
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
 
-      try {
-        await mailer.sendMail({
-          from: `"${studioName}" <${this.config.get('SMTP_USER') ?? 'noreply@inkhub.app'}>`,
-          to: user.email,
-          subject: `[${studioName}] Recuperação de senha`,
-          text: `Olá ${user.name},\n\nClique no link abaixo para redefinir sua senha (válido por 1 hora):\n\n${resetUrl}\n\nSe você não solicitou isso, ignore este e-mail.`,
-          html: `<p>Olá <strong>${user.name}</strong>,</p><p>Clique no link abaixo para redefinir sua senha (válido por 1 hora):</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>Se você não solicitou isso, ignore este e-mail.</p>`,
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { resetToken: tokenHash, resetTokenExp: expiresAt },
         });
-      } catch (err) {
-        // Em dev sem SMTP configurado, loga o link no console
-        console.warn(`[ForgotPassword] SMTP não configurado. Link de reset:\n${resetUrl}`);
-      }
-    }
 
-    return { message: 'Se o e-mail existir, você receberá o link em breve.' };
+        const resetUrl = `${appUrl}/reset-password?token=${rawToken}`;
+        // Sanitiza nome do estúdio para evitar header injection no campo "from"
+        const studioName = ((user as any).tenant?.name ?? 'InkHub').replace(/["\r\n]/g, '');
+
+        try {
+          await mailer.sendMail({
+            from: `"${studioName}" <${this.config.get('SMTP_USER') ?? 'noreply@inkhub.app'}>`,
+            to: user.email,
+            subject: `[${studioName}] Recuperação de senha`,
+            text: `Olá ${user.name},\n\nClique no link abaixo para redefinir sua senha (válido por 1 hora):\n\n${resetUrl}\n\nSe você não solicitou isso, ignore este e-mail.`,
+            html: `<p>Olá <strong>${user.name}</strong>,</p><p>Clique no link abaixo para redefinir sua senha (válido por 1 hora):</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>Se você não solicitou isso, ignore este e-mail.</p>`,
+          });
+        } catch {
+          // Em dev sem SMTP configurado, loga o link no console
+          console.warn(`[ForgotPassword] SMTP não configurado. Link de reset:\n${resetUrl}`);
+        }
+      }
+    } catch (err) {
+      console.error('[ForgotPassword] Erro no background send:', (err as Error).message);
+    }
   }
 
   // ─── Reset password ───────────────────────────────────────────────────────────

@@ -12,11 +12,11 @@ import { SignupDto } from './dto/signup.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 
 class ForgotPasswordDto {
-  @IsEmail() email: string;
+  @IsEmail() @MaxLength(255) email: string;
 }
 
 class ResetPasswordDto {
-  @IsString() token: string;
+  @IsString() @MaxLength(128) token: string;
   @IsString()
   @MinLength(10, { message: 'Senha deve ter pelo menos 10 caracteres' })
   @MaxLength(128)
