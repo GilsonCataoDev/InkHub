@@ -1,0 +1,820 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum PlanType {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  TATTOO_ARTIST
+  RECEPTIONIST
+  BARISTA
+  STOCK_KEEPER
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  IN_SESSION
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  CREDIT_CARD
+  DEBIT_CARD
+  PIX
+  TRANSFER
+}
+
+enum PaymentStatus {
+  PENDING
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
+enum StockMovementType {
+  PURCHASE
+  SALE
+  INTERNAL_USE
+  ADJUSTMENT
+  LOSS
+  RETURN
+}
+
+enum TableStatus {
+  FREE
+  OCCUPIED
+  BILL_REQUESTED
+}
+
+enum OrderStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+enum InvoiceType {
+  RECEIVABLE
+  PAYABLE
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum CashFlowType {
+  INCOME
+  EXPENSE
+}
+
+enum CommissionType {
+  PERCENTAGE
+  FIXED
+}
+
+enum BriefingStatus {
+  NEW
+  CONTACTED
+  CONVERTED
+  ARCHIVED
+}
+
+// ─── Tenant & Plan ───────────────────────────────────────────────────────────
+
+model Plan {
+  id          String   @id @default(uuid())
+  name        String
+  type        PlanType @default(FREE)
+  maxUsers    Int      @default(3)
+  maxClients  Int      @default(100)
+  price       Decimal  @default(0) @db.Decimal(10, 2)
+  features    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenants     Tenant[]
+}
+
+model Tenant {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  domain       String?  @unique
+  logoUrl      String?
+  primaryColor String   @default("#f59e0b")
+  planId       String
+  plan         Plan     @relation(fields: [planId], references: [id])
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  users           User[]
+  clients         Client[]
+  tattooArtists   TattooArtist[]
+  appointments    Appointment[]
+  products        Product[]
+  cafeItems       CafeItem[]
+  tables          Table[]
+  invoices        Invoice[]
+  cashFlows       CashFlow[]
+  stockMovements  StockMovement[]
+  categories      Category[]
+  cafeCategories  CafeCategory[]
+  suppliers       Supplier[]
+  campaigns       Campaign[]
+  goals           Goal[]
+  briefings       Briefing[]
+  portfolioItems  PortfolioItem[]
+  whatsappConfig  WhatsappConfig?
+  automations     Automation[]
+
+  @@index([slug])
+}
+
+// ─── User & Auth ─────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(uuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id])
+  email         String
+  passwordHash  String?
+  name          String
+  avatarUrl     String?
+  role          UserRole  @default(RECEPTIONIST)
+  googleId      String?
+  refreshToken  String?
+  active        Boolean   @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  tattooArtist  TattooArtist?
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+// ─── Client ──────────────────────────────────────────────────────────────────
+
+model Client {
+  id           String    @id @default(uuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  name         String
+  email        String?
+  phone        String?
+  cpf          String?
+  birthDate    DateTime?
+  notes        String?
+  avatarUrl    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  consents       Consent[]
+  anamnesis      Anamnesis[]
+  loyaltyPoints  LoyaltyPoints?
+  appointments   Appointment[]
+  photos         Photo[]
+  interactions   Interaction[]
+
+  @@index([tenantId])
+  @@index([tenantId, email])
+}
+
+model Consent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+  signedAt    DateTime @default(now())
+  ipAddress   String
+  userAgent   String?
+  pdfUrl      String?
+  content     String   @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, clientId])
+}
+
+model Anamnesis {
+  id        String   @id @default(uuid())
+  tenantId  String
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  fields    Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, clientId])
+}
+
+model LoyaltyPoints {
+  id        String   @id @default(uuid())
+  tenantId  String
+  clientId  String   @unique
+  client    Client   @relation(fields: [clientId], references: [id])
+  points    Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  transactions LoyaltyTransaction[]
+
+  @@index([tenantId])
+}
+
+model LoyaltyTransaction {
+  id              String        @id @default(uuid())
+  loyaltyPointsId String
+  loyaltyPoints   LoyaltyPoints @relation(fields: [loyaltyPointsId], references: [id])
+  points          Int
+  reason          String
+  createdAt       DateTime      @default(now())
+}
+
+model Photo {
+  id          String   @id @default(uuid())
+  tenantId    String
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+  url         String
+  caption     String?
+  takenAt     DateTime @default(now())
+  createdAt   DateTime @default(now())
+  deletedAt   DateTime?
+
+  @@index([tenantId, clientId])
+}
+
+// ─── TattooArtist ────────────────────────────────────────────────────────────
+
+model TattooArtist {
+  id           String    @id @default(uuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  userId       String    @unique
+  user         User      @relation(fields: [userId], references: [id])
+  bio          String?
+  specialties  String[]
+  portfolioUrl String?
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  commissions    Commission[]
+  appointments   Appointment[]
+  schedules      Schedule[]
+  goals          Goal[]
+  portfolioItems PortfolioItem[]
+
+  @@index([tenantId])
+}
+
+model Commission {
+  id             String        @id @default(uuid())
+  tenantId       String
+  artistId       String
+  artist         TattooArtist  @relation(fields: [artistId], references: [id])
+  type           CommissionType @default(PERCENTAGE)
+  value          Decimal       @db.Decimal(10, 2)
+  serviceType    String        @default("DEFAULT")
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([artistId, serviceType])
+  @@index([tenantId, artistId])
+}
+
+model Schedule {
+  id        String       @id @default(uuid())
+  tenantId  String
+  artistId  String
+  artist    TattooArtist @relation(fields: [artistId], references: [id])
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  active    Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([tenantId, artistId])
+}
+
+model Goal {
+  id        String       @id @default(uuid())
+  tenantId  String
+  tenant    Tenant       @relation(fields: [tenantId], references: [id])
+  artistId  String
+  artist    TattooArtist @relation(fields: [artistId], references: [id])
+  month     Int
+  year      Int
+  target    Decimal      @db.Decimal(10, 2)
+  achieved  Decimal      @default(0) @db.Decimal(10, 2)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([artistId, month, year])
+  @@index([tenantId])
+}
+
+// ─── Appointment ─────────────────────────────────────────────────────────────
+
+model Appointment {
+  id              String            @id @default(uuid())
+  tenantId        String
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  clientId        String
+  client          Client            @relation(fields: [clientId], references: [id])
+  artistId        String
+  artist          TattooArtist      @relation(fields: [artistId], references: [id])
+  date            DateTime
+  durationMinutes Int               @default(60)
+  status          AppointmentStatus @default(PENDING)
+  description     String?
+  bodyPart        String?
+  estimatedValue  Decimal?          @db.Decimal(10, 2)
+  deposit         Decimal           @default(0) @db.Decimal(10, 2)
+  notes           String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  deletedAt       DateTime?
+
+  sessions  Session[]
+  payments  Payment[]
+  checkout  SessionCheckout?
+
+  @@index([tenantId])
+  @@index([tenantId, artistId])
+  @@index([tenantId, clientId])
+  @@index([date])
+}
+
+model Session {
+  id            String      @id @default(uuid())
+  tenantId      String
+  appointmentId String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+  startedAt     DateTime    @default(now())
+  endedAt       DateTime?
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([tenantId])
+}
+
+model Payment {
+  id            String        @id @default(uuid())
+  tenantId      String
+  appointmentId String?
+  appointment   Appointment?  @relation(fields: [appointmentId], references: [id])
+  orderId       String?
+  order         Order?        @relation(fields: [orderId], references: [id])
+  amount        Decimal       @db.Decimal(10, 2)
+  method        PaymentMethod
+  status        PaymentStatus @default(PENDING)
+  paidAt        DateTime?
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([tenantId])
+}
+
+// ─── Product & Store ─────────────────────────────────────────────────────────
+
+model Category {
+  id        String    @id @default(uuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  products  Product[]
+
+  @@index([tenantId])
+}
+
+model Supplier {
+  id        String    @id @default(uuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  name      String
+  email     String?
+  phone     String?
+  cnpj      String?
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  products  Product[]
+
+  @@index([tenantId])
+}
+
+model Product {
+  id              String    @id @default(uuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id])
+  categoryId      String?
+  category        Category? @relation(fields: [categoryId], references: [id])
+  supplierId      String?
+  supplier        Supplier? @relation(fields: [supplierId], references: [id])
+  sku             String
+  name            String
+  description     String?
+  costPrice       Decimal   @db.Decimal(10, 2)
+  salePrice       Decimal   @db.Decimal(10, 2)
+  stock           Int       @default(0)
+  minStock        Int       @default(5)
+  unit            String    @default("un")
+  imageUrl        String?
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  stockMovements  StockMovement[]
+  orderItems      OrderItem[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+}
+
+model StockMovement {
+  id          String            @id @default(uuid())
+  tenantId    String
+  tenant      Tenant            @relation(fields: [tenantId], references: [id])
+  productId   String?
+  product     Product?          @relation(fields: [productId], references: [id])
+  cafeItemId  String?
+  cafeItem    CafeItem?         @relation(fields: [cafeItemId], references: [id])
+  type        StockMovementType
+  quantity    Int
+  reason      String?
+  unitCost    Decimal?          @db.Decimal(10, 2)
+  createdAt   DateTime          @default(now())
+  createdBy   String?
+
+  @@index([tenantId])
+  @@index([tenantId, productId])
+}
+
+// ─── Cafe ────────────────────────────────────────────────────────────────────
+
+model CafeCategory {
+  id        String    @id @default(uuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  items     CafeItem[]
+
+  @@index([tenantId])
+}
+
+model CafeItem {
+  id          String       @id @default(uuid())
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  categoryId  String?
+  category    CafeCategory? @relation(fields: [categoryId], references: [id])
+  name        String
+  description String?
+  price       Decimal      @db.Decimal(10, 2)
+  imageUrl    String?
+  available   Boolean      @default(true)
+  stock       Int          @default(0)
+  minStock    Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  deletedAt   DateTime?
+
+  stockMovements StockMovement[]
+  orderItems     OrderItem[]
+
+  @@index([tenantId])
+}
+
+model Table {
+  id        String      @id @default(uuid())
+  tenantId  String
+  tenant    Tenant      @relation(fields: [tenantId], references: [id])
+  number    Int
+  capacity  Int         @default(4)
+  status    TableStatus @default(FREE)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  deletedAt DateTime?
+
+  orders    Order[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId])
+}
+
+model Order {
+  id        String      @id @default(uuid())
+  tenantId  String
+  tableId   String
+  table     Table       @relation(fields: [tableId], references: [id])
+  status    OrderStatus @default(OPEN)
+  openedAt  DateTime    @default(now())
+  closedAt  DateTime?
+  notes     String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  items     OrderItem[]
+  payments  Payment[]
+
+  @@index([tenantId])
+  @@index([tenantId, tableId])
+}
+
+model OrderItem {
+  id         String    @id @default(uuid())
+  orderId    String
+  order      Order     @relation(fields: [orderId], references: [id])
+  productId  String?
+  product    Product?  @relation(fields: [productId], references: [id])
+  cafeItemId String?
+  cafeItem   CafeItem? @relation(fields: [cafeItemId], references: [id])
+  quantity   Int
+  unitPrice  Decimal   @db.Decimal(10, 2)
+  notes      String?
+  createdAt  DateTime  @default(now())
+}
+
+// ─── Financial ───────────────────────────────────────────────────────────────
+
+model Invoice {
+  id          String        @id @default(uuid())
+  tenantId    String
+  tenant      Tenant        @relation(fields: [tenantId], references: [id])
+  type        InvoiceType
+  status      InvoiceStatus @default(PENDING)
+  description String
+  amount      Decimal       @db.Decimal(10, 2)
+  dueDate     DateTime
+  paidAt      DateTime?
+  paidAmount  Decimal?      @db.Decimal(10, 2)
+  category    String?
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+
+  items       InvoiceItem[]
+
+  @@index([tenantId])
+  @@index([tenantId, dueDate])
+}
+
+model InvoiceItem {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id])
+  description String
+  quantity    Int     @default(1)
+  unitPrice   Decimal @db.Decimal(10, 2)
+  total       Decimal @db.Decimal(10, 2)
+}
+
+model CashFlow {
+  id          String       @id @default(uuid())
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  type        CashFlowType
+  amount      Decimal      @db.Decimal(10, 2)
+  category    String
+  description String
+  date        DateTime     @default(now())
+  source      String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, date])
+}
+
+// ─── CRM ─────────────────────────────────────────────────────────────────────
+
+model Interaction {
+  id          String   @id @default(uuid())
+  tenantId    String
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+  type        String
+  description String
+  createdAt   DateTime @default(now())
+  createdBy   String?
+
+  @@index([tenantId, clientId])
+}
+
+model Campaign {
+  id          String    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  name        String
+  subject     String
+  body        String    @db.Text
+  segment     String
+  sentAt      DateTime?
+  recipientCount Int   @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  @@index([tenantId])
+}
+
+// ─── Session Checkout ────────────────────────────────────────────────────────
+
+model SessionCheckout {
+  id               String      @id @default(uuid())
+  tenantId         String
+  appointmentId    String      @unique
+  appointment      Appointment @relation(fields: [appointmentId], references: [id])
+  grossAmount      Decimal     @db.Decimal(10, 2)
+  discount         Decimal     @default(0) @db.Decimal(10, 2)
+  tip              Decimal     @default(0) @db.Decimal(10, 2)
+  finalAmount      Decimal     @db.Decimal(10, 2)
+  depositDeducted  Decimal     @default(0) @db.Decimal(10, 2)
+  amountDue        Decimal     @db.Decimal(10, 2)
+  paymentMethod    PaymentMethod
+  commissionRate   Decimal     @db.Decimal(5, 4)
+  commissionAmount Decimal     @db.Decimal(10, 2)
+  pointsAwarded    Int         @default(0)
+  touchUpDate      DateTime?
+  touchUpBooked    Boolean     @default(false)
+  receiptSent      Boolean     @default(false)
+  notes            String?
+  checkedOutBy     String
+  createdAt        DateTime    @default(now())
+
+  @@index([tenantId])
+}
+
+// ─── Portfolio ───────────────────────────────────────────────────────────────
+
+model PortfolioItem {
+  id          String       @id @default(uuid())
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  artistId    String
+  artist      TattooArtist @relation(fields: [artistId], references: [id])
+  imageUrl    String
+  thumbUrl    String?
+  style       String
+  placement   String?
+  description String?      @db.Text
+  tags        String[]
+  featured    Boolean      @default(false)
+  public      Boolean      @default(true)
+  slug        String
+  viewCount   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, style])
+  @@index([tenantId, public, featured])
+}
+
+// ─── WhatsApp ────────────────────────────────────────────────────────────────
+
+model WhatsappConfig {
+  id          String   @id @default(uuid())
+  tenantId    String   @unique
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  provider    String   @default("evolution")
+  instanceUrl String
+  apiKey      String
+  phoneNumber String
+  active      Boolean  @default(false)
+  template48h String   @default("Olá {nome}! 📅 Lembrete: sua sessão no *{estudio}* é *amanhã às {hora}* com {tatuador}. Confirme respondendo *SIM* ou cancele com *NÃO*.")
+  template2h  String   @default("Sua sessão é *hoje às {hora}*! Te esperamos no {estudio}. 🎨")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model WhatsappMessage {
+  id            String    @id @default(uuid())
+  tenantId      String
+  appointmentId String?
+  clientPhone   String
+  direction     String    @default("outbound")
+  body          String    @db.Text
+  type          String
+  status        String    @default("queued")
+  externalId    String?
+  sentAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, appointmentId])
+}
+
+// ─── Automations CRM ─────────────────────────────────────────────────────────
+
+model Automation {
+  id         String    @id @default(uuid())
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
+  name       String
+  trigger    String
+  delayDays  Int       @default(0)
+  channel    String    @default("whatsapp")
+  subject    String?
+  template   String    @db.Text
+  active     Boolean   @default(true)
+  runCount   Int       @default(0)
+  lastRunAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  executions AutomationExecution[]
+
+  @@index([tenantId])
+}
+
+model AutomationExecution {
+  id           String     @id @default(uuid())
+  automationId String
+  automation   Automation @relation(fields: [automationId], references: [id])
+  clientId     String
+  channel      String
+  status       String     @default("sent")
+  error        String?
+  sentAt       DateTime   @default(now())
+
+  @@index([automationId])
+  @@index([clientId])
+}
+
+// ─── Briefing (formulário público de captação) ──────────────────────────────
+
+model Briefing {
+  id             String         @id @default(uuid())
+  tenantId       String
+  tenant         Tenant         @relation(fields: [tenantId], references: [id])
+
+  // Dados de contato
+  name           String
+  email          String
+  phone          String?
+  instagram      String?
+
+  // Briefing da tatuagem
+  idea           String         @db.Text
+  style          String?
+  placement      String?
+  size           String?
+  budget         String?
+  colorOrBlack   String?        // "color" | "black_grey" | "undecided"
+  isFirstTattoo  Boolean        @default(false)
+
+  // Imagens de referência (URLs dos uploads)
+  referenceImages String[]      @default([])
+
+  // Gestão interna
+  status         BriefingStatus @default(NEW)
+  notes          String?        @db.Text   // notas internas do estúdio
+  assignedTo     String?        // userId do atendente
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+}

@@ -1,0 +1,27 @@
+{
+  "name": "inkhub",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "db:generate": "pnpm --filter @inkhub/database generate",
+    "db:migrate": "pnpm --filter @inkhub/database migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @inkhub/database migrate:deploy",
+    "db:push": "pnpm --filter @inkhub/database db:push",
+    "db:seed": "pnpm --filter @inkhub/database seed",
+    "db:studio": "pnpm --filter @inkhub/database studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  }
+}
