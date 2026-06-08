@@ -51,4 +51,4 @@ RUN mkdir -p uploads auth_sessions
 
 EXPOSE 3000
 # Roda migrations antes de iniciar o app (prisma disponível via shamefully-hoist)
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy --schema packages/database/prisma/schema.prisma && node dist/main.js"]
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate resolve --rolled-back 20260608000000_init --schema packages/database/prisma/schema.prisma 2>/dev/null; node_modules/.bin/prisma migrate deploy --schema packages/database/prisma/schema.prisma && node dist/main.js"]
