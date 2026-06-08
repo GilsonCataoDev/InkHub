@@ -50,4 +50,5 @@ RUN pnpm --filter @inkhub/database generate
 RUN mkdir -p uploads auth_sessions
 
 EXPOSE 3000
-CMD ["node", "dist/main.js"]
+# Roda migrations antes de iniciar o app (prisma disponível via shamefully-hoist)
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy --schema packages/database/prisma/schema.prisma && node dist/main.js"]
