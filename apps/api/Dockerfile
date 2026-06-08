@@ -15,6 +15,8 @@ FROM deps AS builder
 COPY . .
 # Gera o Prisma client (produz binários para linux-musl/Alpine)
 RUN pnpm --filter @inkhub/database generate
+# Remove cache incremental do TypeScript para forçar rebuild completo
+RUN find /app -name "*.tsbuildinfo" -delete
 # Builda a API
 RUN pnpm --filter @inkhub/api build
 
