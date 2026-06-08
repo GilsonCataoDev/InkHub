@@ -301,6 +301,9 @@ importers:
       '@prisma/client':
         specifier: ^5.14.0
         version: 5.22.0(prisma@5.22.0)
+      prisma:
+        specifier: ^5.14.0
+        version: 5.22.0
     devDependencies:
       '@faker-js/faker':
         specifier: ^8.4.1
@@ -314,9 +317,6 @@ importers:
       dotenv:
         specifier: ^16.4.5
         version: 16.4.5
-      prisma:
-        specifier: ^5.14.0
-        version: 5.22.0
       tsx:
         specifier: ^4.11.0
         version: 4.22.4
