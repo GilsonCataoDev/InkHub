@@ -29,8 +29,9 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json ./apps/api/
 COPY packages/database/package.json ./packages/database/
 
-# Instala apenas prod deps — prisma agora está em dependencies, não devDependencies
-RUN pnpm install --frozen-lockfile --prod --ignore-scripts
+# Instala prod deps com hoisting para evitar problemas de symlink do pnpm no Docker
+# --shamefully-hoist: todos os pacotes vão para root node_modules (como npm), sem symlinks
+RUN pnpm install --frozen-lockfile --prod --shamefully-hoist
 
 # Copia o build compilado
 COPY --from=builder /app/apps/api/dist ./dist
