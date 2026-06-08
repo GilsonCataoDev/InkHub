@@ -22,6 +22,9 @@ RUN pnpm --filter @inkhub/api build
 
 # Runner de produção
 FROM node:20-alpine AS runner
+# openssl é necessário para o Prisma detectar corretamente OpenSSL 3.x
+# e carregar o binário linux-musl-openssl-3.0.x em vez do 1.1
+RUN apk add --no-cache openssl
 RUN npm install -g pnpm@9.0.0
 WORKDIR /app
 ENV NODE_ENV=production
